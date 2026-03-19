@@ -211,17 +211,29 @@ class BasePredictor:
         self.run_callbacks("on_predict_end")
         return self.all_outputs
 
+    # def show(self, p):
+    #     im0 = self.annotator.result()
+    #     if platform.system() == 'Linux' and p not in self.windows:
+    #         self.windows.append(p)
+    #         cv2.namedWindow(str(p), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
+    #         cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
+    #     cv2.imshow(str(p), im0)
+    #     cv2.waitKey(1)  # 1 millisecond
     def show(self, p):
-        im0 = self.annotator.result()
-        if platform.system() == 'Linux' and p not in self.windows:
-            self.windows.append(p)
-            cv2.namedWindow(str(p), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-            cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
+        if self.annotator is not None:
+            im0 = self.annotator.result()
+        else:
+            im0 = self.plotted_img  # ⭐ 用你自己画的图
+
         cv2.imshow(str(p), im0)
-        cv2.waitKey(1)  # 1 millisecond
+        cv2.waitKey(1)
 
     def save_preds(self, vid_cap, idx, save_path):
-        im0 = self.annotator.result()
+        # im0 = self.annotator.result()
+        if self.annotator is not None:
+            im0 = self.annotator.result()
+        else:
+            im0 = self.plotted_img
         # save imgs
         if self.dataset.mode == 'image':
             cv2.imwrite(save_path, im0)
