@@ -1,5 +1,5 @@
 # Ultralytics YOLO 🚀
-# 此文件纯识别车
+# 同时识别车和人 vehicle and pedestrians
 import sys
 import os
 
@@ -35,8 +35,23 @@ data_deque = {}
 
 # 计数
 counted_ids = set()
-enter_count = {"car": 0, "truck": 0, "bus": 0}
-leave_count = {"car": 0, "truck": 0, "bus": 0}
+# ⭐ 修改1：扩展计数字典，包含人和各类车辆
+enter_count = {
+    "person": 0,    # 行人
+    "car": 0,       # 汽车
+    "truck": 0,     # 卡车
+    "bus": 0,       # 公交车
+    "motorcycle": 0,# 摩托车
+    "bicycle": 0    # 自行车
+}
+leave_count = {
+    "person": 0,
+    "car": 0,
+    "truck": 0,
+    "bus": 0,
+    "motorcycle": 0,
+    "bicycle": 0
+}
 
 # 计数区域参数
 line_y = 0
@@ -48,8 +63,26 @@ drawing = False
 points = []
 deepsort = None
 
-# 有效类别
-valid_classes = ["car", "truck", "bus"]
+# ⭐ 修改2：有效类别 - 同时包括人和车
+valid_classes = [
+    "person",        # 人 (类别ID: 0)
+    "car",           # 汽车 (类别ID: 2)
+    "truck",         # 卡车 (类别ID: 7)
+    "bus",           # 公交车 (类别ID: 5)
+    "motorcycle",    # 摩托车 (类别ID: 3)
+    "bicycle"        # 自行车 (类别ID: 1)
+]
+
+# YOLO类别ID到名称的映射
+class_id_to_name = {
+    0: "person",
+    1: "bicycle",
+    2: "car",
+    3: "motorcycle",
+    5: "bus",
+    7: "truck"
+}
+
 min_confidence = 0.5
 
 
@@ -192,7 +225,7 @@ def is_bbox_in_road(bbox, polygon):
     if is_point_in_road(center_point, polygon):
         return True, "center"
 
-    # 检查框的底部中心点
+    # 检查框的底部中心点（对于行人，这个点更准确）
     bottom_center = (int(center_x), int(y2))
     if is_point_in_road(bottom_center, polygon):
         return True, "bottom"
@@ -235,15 +268,25 @@ def xyxy_to_xywh(*xyxy):
     return x_c, y_c, bbox_w, bbox_h
 
 
+# ⭐ 修改3：扩展颜色函数，为人和所有车辆类别分配不同颜色
 def compute_color_for_labels(label):
-    if label == 2:  # car
-        return (222, 82, 175)
+    """
+    根据类别标签计算固定颜色
+    """
+    if label == 0:  # person
+        return (255, 255, 0)      # 青色
+    elif label == 1:  # bicycle
+        return (255, 0, 255)      # 洋红色
+    elif label == 2:  # car
+        return (222, 82, 175)     # 紫色
+    elif label == 3:  # motorcycle
+        return (0, 204, 255)      # 橙色
     elif label == 5:  # bus
-        return (0, 149, 255)
+        return (0, 149, 255)      # 蓝色
     elif label == 7:  # truck
-        return (255, 204, 0)
+        return (255, 204, 0)      # 黄色
     else:
-        return (255, 255, 255)
+        return (255, 255, 255)    # 白色（默认）
 
 
 def UI_box(x, img, color=None, label=None, line_thickness=2, confidence=None):
@@ -286,7 +329,7 @@ def draw_count_zone(img, line_y, zone_thickness):
     return img
 
 
-# ================= 核心：画框 + 计数（只显示区域内车辆） =================
+# ================= 核心：画框 + 计数（只显示区域内的人和车） =================
 def draw_boxes(img, bbox, names, object_id, identities, detection_info=None):
     global line_y
 
@@ -331,14 +374,14 @@ def draw_boxes(img, bbox, names, object_id, identities, detection_info=None):
         if confidence < min_confidence:
             continue
 
-        # 检查是否在道路区域内
+        # ⭐ 修改4：检查是否在道路区域内（人和车都检查）
         in_road, check_type = is_bbox_in_road([x1, y1, x2, y2], road_polygon)
 
-        # 只处理有效类别且在道路内的车辆
+        # ⭐ 修改5：只处理有效类别（人和车）且在道路内的目标
         if obj_name not in valid_classes or not in_road:
-            continue  # ⭐ 关键：不在道路内的直接跳过，不显示
+            continue  # 不在道路内或不感兴趣的类别直接跳过
 
-        # 只有道路内的车辆才会执行到这里
+        # 只有道路内的目标才会执行到这里
         if track_id not in data_deque:
             data_deque[track_id] = deque(maxlen=30)
 
@@ -359,15 +402,22 @@ def draw_boxes(img, bbox, names, object_id, identities, detection_info=None):
                     counted_ids.add(track_id)
                     road_objects.append((track_id, obj_name, "leaving"))
 
-        # 绘制框（只画道路内的车辆）
+        # 绘制框
         color = compute_color_for_labels(cls_id)
 
         zone_top = max(0, line_y - count_zone_thickness // 2)
         zone_bottom = min(h, line_y + count_zone_thickness // 2)
 
+        # ⭐ 修改6：根据类别显示不同的标签
+        if obj_name == "person":
+            # 行人的标签特殊处理，用更醒目的方式
+            label = f"P{track_id}:{obj_name}"
+        else:
+            # 车辆的标签
+            label = f"V{track_id}:{obj_name}"
+
         if zone_top <= center[1] <= zone_bottom:
             # 在计数区域内
-            label = f"{track_id}:{obj_name}"
             if check_type == "bottom":
                 label += " [BOTTOM]"
             UI_box(box, img, color, label, line_thickness=3, confidence=confidence)
@@ -375,7 +425,6 @@ def draw_boxes(img, bbox, names, object_id, identities, detection_info=None):
             road_objects.append((track_id, obj_name, "in_zone"))
         else:
             # 在道路内但不在计数区域
-            label = f"{track_id}:{obj_name}"
             UI_box(box, img, color, label, line_thickness=2, confidence=confidence)
 
         # 绘制轨迹
@@ -385,26 +434,41 @@ def draw_boxes(img, bbox, names, object_id, identities, detection_info=None):
                      data_deque[track_id][j],
                      color, 2)
 
-    # 显示统计信息
+    # ⭐ 修改7：显示统计信息（包括人和各类车辆）
+    # 左侧统计（进入的）
     y = 40
     cv2.rectangle(img, (10, 25), (300, 25 + len(enter_count) * 30), (0, 0, 0), -1)
+    cv2.putText(img, "ENTERING", (20, y - 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     for k, v in enter_count.items():
-        cv2.putText(img, f"ENTERING {k}:{v}", (20, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        y += 30
+        # 只显示有计数的类别
+        if v > 0 or k in ["person", "car"]:  # 至少显示人和车
+            color = (0, 255, 0) if k == "person" else (0, 255, 0)
+            cv2.putText(img, f"{k}:{v}", (20, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            y += 25
 
+    # 右侧统计（离开的）
     y = 40
     cv2.rectangle(img, (w - 310, 25), (w - 10, 25 + len(leave_count) * 30), (0, 0, 0), -1)
+    cv2.putText(img, "LEAVING", (w - 300, y - 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     for k, v in leave_count.items():
-        cv2.putText(img, f"LEAVING {k}:{v}", (w - 300, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-        y += 30
+        if v > 0 or k in ["person", "car"]:
+            color = (0, 0, 255) if k == "person" else (0, 0, 255)
+            cv2.putText(img, f"{k}:{v}", (w - 300, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            y += 25
 
-    # 显示道路内车辆数量
-    cv2.putText(img, f"Vehicles in road: {len(road_objects)}", (10, h - 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    # 显示道路内目标总数
+    person_count = sum(1 for obj in road_objects if obj[1] == "person")
+    vehicle_count = len(road_objects) - person_count
+    cv2.putText(img, f"Pedestrians: {person_count} | Vehicles: {vehicle_count}",
+                (10, h - 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
     return img
+
 
 # ================= Predictor =================
 class DetectionPredictor(BasePredictor):
@@ -435,17 +499,22 @@ class DetectionPredictor(BasePredictor):
         detection_info = []
 
         for *xyxy, conf, cls in det:
-            x_c, y_c, w, h = xyxy_to_xywh(*xyxy)
-            xywh_bboxs.append([x_c, y_c, w, h])
-            confs.append([conf.item()])
-            oids.append(int(cls))
+            # ⭐ 修改8：过滤类别，只处理感兴趣的人车类别
+            if int(cls) in class_id_to_name.keys():
+                x_c, y_c, w, h = xyxy_to_xywh(*xyxy)
+                xywh_bboxs.append([x_c, y_c, w, h])
+                confs.append([conf.item()])
+                oids.append(int(cls))
 
-            detection_info.append({
-                'confidence': conf.item(),
-                'class': int(cls),
-                'bbox': [x.item() for x in xyxy],
-                'track_id': None
-            })
+                detection_info.append({
+                    'confidence': conf.item(),
+                    'class': int(cls),
+                    'bbox': [x.item() for x in xyxy],
+                    'track_id': None
+                })
+
+        if len(xywh_bboxs) == 0:
+            return ""
 
         xywhs = torch.Tensor(xywh_bboxs)
         confss = torch.Tensor(confs)
@@ -512,9 +581,12 @@ def predict_div(cfg):
         print(f"使用命令行多边形坐标: {road_polygon.tolist()}")
 
     else:
-        # 默认区域
-        road_polygon = np.array([[550, 300], [750, 300], [1200, 600], [0, 600]], np.int32)
+        # 默认区域 - 覆盖更广的区域以同时捕捉人和车
+        road_polygon = np.array([[0, 300], [1920, 200], [1920, 700], [0, 700]], np.int32)
         print(f"使用默认多边形坐标: {road_polygon.tolist()}")
+
+    print(f"正在同时识别人和车辆...")
+    print(f"目标类别: {', '.join(valid_classes)}")
 
     predictor = DetectionPredictor(cfg)
     predictor()
